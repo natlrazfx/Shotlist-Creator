@@ -98,6 +98,7 @@ keyboard = Controller()
 
 APP_NAME = "ShotlistCreator"
 APP_VERSION = "2.1.2"
+__version__ = APP_VERSION
 RELEASE_FLAG = True
 APP_TITLE = APP_NAME if RELEASE_FLAG else f"{APP_NAME} v{APP_VERSION} (dev)"
 
