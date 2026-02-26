@@ -1,5 +1,5 @@
 # Natalia Raz
-# Shotlist Creator 2.1.2 for DaVinci Resolve Studio
+# ShotlistCreator for DaVinci Resolve Studio
 
 import os
 import json
@@ -95,6 +95,12 @@ def focus_on_timeline():
 
 resolve = dvr_script.scriptapp("Resolve")
 keyboard = Controller()
+
+APP_NAME = "ShotlistCreator"
+APP_VERSION = "2.1.2"
+RELEASE_FLAG = True
+APP_TITLE = APP_NAME if RELEASE_FLAG else f"{APP_NAME} v{APP_VERSION} (dev)"
+
 
 def get_save_file_name(project_name):
     app = QtWidgets.QApplication.instance()
@@ -379,7 +385,7 @@ class UserInputDialog(QtWidgets.QDialog):
         self.setWindowFlag(QtCore.Qt.WindowStaysOnTopHint)
         # Large default size
         self.resize(1200, 800)
-        self.setWindowTitle("Shotlist Creator Options")
+        self.setWindowTitle(f"{APP_TITLE} Options")
 
         self.search_results = []
         self.search_index = 0

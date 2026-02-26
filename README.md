@@ -1,7 +1,7 @@
-# shotlist_creator2.1.2
+# ShotlistCreator
 This script is a powerful tool for DaVinci Resolve Studio users, specifically designed for those working on storyboards, VFX breakdowns, and notes. It allows you to export marker data and stills directly to an Excel file, helping streamline your workflow and improve communication with vendors, clients, and artists.
 
-### UPDATE 2.1.2
+### Current Version: 2.1.2
 [![Watch the video](https://img.youtube.com/vi/f1luGUWT4PQ/maxresdefault.jpg)](https://youtu.be/f1luGUWT4PQ)
 
 ## Compatibility
@@ -15,12 +15,12 @@ Python 3.10.9 (https://www.python.org/downloads/release/python-3109/)
 There are two ways to use this script:
 
 **1. From the box (pre-compiled executable):**
-Unzip the downloaded folder to your preferred location. Inside the folder dist, you will find the executable file shotlist_creator2.  
+Unzip the downloaded folder to your preferred location. Inside the folder dist, you will find the executable file ShotlistCreator.  
   [download win pre-compiled executable](https://drive.google.com/file/d/1bj_FhSeDl47fcXVf6rjhiat9ovwBXJRo/view?usp=sharing)    
   [download mac pre-compiled executable](https://drive.google.com/file/d/1bkdBp0rl9xUwwEEEXbDTJ2QrdGBNwaO7/view?usp=sharing)
 
 **2. Running directly from DaVinci Resolve Studio:**  
-Copy the file shotlist_creator2.py to the DaVinci Resolve Utility scripts folder:  
+Copy the file ShotlistCreator.py to the DaVinci Resolve Utility scripts folder:  
 *For macOS:* /Library/Application Support/Blackmagic Design/DaVinci Resolve/Fusion/Scripts/Utility/  
 *For Windows:* C:\ProgramData\Blackmagic Design\DaVinci Resolve\Fusion\Scripts\Utility\  
 Make sure the following Python modules are installed:  
@@ -32,7 +32,7 @@ Make sure the following Python modules are installed:
 
 ## How it works:
   1. Open DaVinci Resolve Studio and load your project.
-  2. Go to keyboard customization and assign a key for "Next Marker" (Playback > Next Marker ("0")). This setup is required once. If you run shotlist_creator2.py directly from DaVinci Resolve Studio, you can modify the hotkey in the script and then assign it in the keyboard customization.
+  2. Go to keyboard customization and assign a key for "Next Marker" (Playback > Next Marker ("0")). This setup is required once. If you run ShotlistCreator.py directly from DaVinci Resolve Studio, you can modify the hotkey in the script and then assign it in the keyboard customization.
   3. Ensure that the album stills1 (in the color page) is empty. This is crucial for the script to function correctly.
   4. Run the script. A dialog box will prompt you to select options such as deleting stills from the album on the color page, setting the timeline timecode, choosing which metadata to extract, and defining the thumbnail size. The script will navigate through the timeline markers, capture thumbnails, and export the marker data and stills to an Excel file in your chosen folder.
 
