@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="${1:-2.1.15}"
+VERSION="${1:-2.1.14}"
 APP_NAME="ShotlistCreator"
 
 ICON_ARG=()

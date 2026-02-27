@@ -1,5 +1,5 @@
 # Natalia Raz
-# ShotlistCreator v2.1.15 for DaVinci Resolve Studio
+# ShotlistCreator v2.1.14 for DaVinci Resolve Studio
 
 import os
 import json
@@ -188,7 +188,7 @@ resolve = dvr_script.scriptapp("Resolve")
 keyboard = Controller()
 
 APP_NAME = "ShotlistCreator"
-APP_VERSION = "2.1.15"
+APP_VERSION = "2.1.14"
 __version__ = APP_VERSION
 RELEASE_FLAG = True
 APP_TITLE = f"{APP_NAME} v{APP_VERSION}" if RELEASE_FLAG else f"{APP_NAME} v{APP_VERSION} (dev)"

@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "2.1.15"
+    [string]$Version = "2.1.14"
 )
 
 $ErrorActionPreference = "Stop"
@@ -7,6 +7,7 @@ $ErrorActionPreference = "Stop"
 $pyArgs = @(
     "-m", "PyInstaller",
     "--noconfirm",
+    "--onefile",
     "--windowed",
     "--name", "ShotlistCreator",
     "--add-data", "assets;assets"
@@ -23,12 +24,12 @@ $pyArgs += "ShotlistCreator.py"
 
 python @pyArgs
 
-$issPath = "packaging/windows/ShotlistCreator.iss"
-$innoExe = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+$sourceExe = "dist/ShotlistCreator.exe"
+$targetExe = "dist/ShotlistCreator-$Version-Windows-Setup.exe"
 
-if (-Not (Test-Path $innoExe)) {
-    throw "Inno Setup compiler not found: $innoExe"
+if (-Not (Test-Path $sourceExe)) {
+    throw "PyInstaller output not found: $sourceExe"
 }
 
-& $innoExe "/DMyAppVersion=$Version" $issPath
-Write-Host "Built: dist/ShotlistCreator-$Version-Windows-Setup.exe"
+Copy-Item -Path $sourceExe -Destination $targetExe -Force
+Write-Host "Built: $targetExe"
