@@ -1,18 +1,27 @@
 param(
-    [string]$Version = "2.1.14"
+    [string]$Version = "2.1.15"
 )
 
 $ErrorActionPreference = "Stop"
 
-$iconArg = ""
+$pyArgs = @(
+    "-m", "PyInstaller",
+    "--noconfirm",
+    "--windowed",
+    "--name", "ShotlistCreator",
+    "--add-data", "assets;assets"
+)
+
 if (Test-Path "icon.ico") {
-    $iconArg = "--icon icon.ico"
+    $pyArgs += @("--icon", "icon.ico")
 }
 elseif (Test-Path "icon.png") {
-    $iconArg = "--icon icon.png"
+    $pyArgs += @("--icon", "icon.png")
 }
 
-python -m PyInstaller --noconfirm --windowed --name ShotlistCreator --add-data "assets;assets" $iconArg ShotlistCreator.py
+$pyArgs += "ShotlistCreator.py"
+
+python @pyArgs
 
 $issPath = "packaging/windows/ShotlistCreator.iss"
 $innoExe = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"

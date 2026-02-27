@@ -35,21 +35,21 @@ jobs:
           fi
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
-      - name: Build macOS pkg
+      - name: Build macOS dmg
         run: |
-          ./packaging/macos/build_pkg.sh "${{ steps.version.outputs.version }}"
+          ./packaging/macos/build_dmg.sh "${{ steps.version.outputs.version }}"
 
       - name: Upload macOS installer artifact
         uses: actions/upload-artifact@v4
         with:
           name: ShotlistCreator-macOS-${{ steps.version.outputs.version }}
-          path: dist/ShotlistCreator-${{ steps.version.outputs.version }}-macOS.pkg
+          path: dist/ShotlistCreator-${{ steps.version.outputs.version }}-macOS.dmg
 
       - name: Attach macOS installer to GitHub Release
         if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/ShotlistCreator-${{ steps.version.outputs.version }}-macOS.pkg
+          files: dist/ShotlistCreator-${{ steps.version.outputs.version }}-macOS.dmg
 
   windows:
     runs-on: windows-latest

@@ -1,5 +1,5 @@
 # Natalia Raz
-# ShotlistCreator v2.1.14 for DaVinci Resolve Studio
+# ShotlistCreator v2.1.15 for DaVinci Resolve Studio
 
 import os
 import json
@@ -188,11 +188,11 @@ resolve = dvr_script.scriptapp("Resolve")
 keyboard = Controller()
 
 APP_NAME = "ShotlistCreator"
-APP_VERSION = "2.1.14"
+APP_VERSION = "2.1.15"
 __version__ = APP_VERSION
-RELEASE_FLAG = False
+RELEASE_FLAG = True
 APP_TITLE = f"{APP_NAME} v{APP_VERSION}" if RELEASE_FLAG else f"{APP_NAME} v{APP_VERSION} (dev)"
-README_URL = "https://github.com/natlrazfx/shotlist_creator2.1.2#how-it-works"
+README_URL = "https://github.com/natlrazfx/Shotlist-Creator#how-it-works"
 SETUP_VIDEO_URL = "https://youtu.be/lGYmBYw0BuA"
 SETUP_THUMBNAIL_URL = "https://img.youtube.com/vi/lGYmBYw0BuA/maxresdefault.jpg"
 SETUP_LOCAL_IMAGE = os.path.join("assets", "next_marker_bind.png")
