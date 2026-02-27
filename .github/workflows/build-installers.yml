@@ -1,0 +1,100 @@
+name: Build Installers
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-build.txt
+
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="$(python -c "import re, pathlib; t=pathlib.Path('ShotlistCreator.py').read_text(encoding='utf-8'); m=re.search(r'APP_VERSION\\s*=\\s*\"([^\"]+)\"', t); print(m.group(1) if m else '0.0.0')")"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Build macOS pkg
+        run: |
+          ./packaging/macos/build_pkg.sh "${{ steps.version.outputs.version }}"
+
+      - name: Upload macOS installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ShotlistCreator-macOS-${{ steps.version.outputs.version }}
+          path: dist/ShotlistCreator-${{ steps.version.outputs.version }}-macOS.pkg
+
+      - name: Attach macOS installer to GitHub Release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/ShotlistCreator-${{ steps.version.outputs.version }}-macOS.pkg
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-build.txt
+
+      - name: Install Inno Setup
+        run: choco install innosetup -y
+
+      - name: Resolve version
+        id: version
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            $version = $env:GITHUB_REF_NAME -replace '^v', ''
+          }
+          else {
+            $content = Get-Content ShotlistCreator.py -Raw
+            $match = [regex]::Match($content, 'APP_VERSION\s*=\s*"([^"]+)"')
+            if ($match.Success) { $version = $match.Groups[1].Value } else { $version = '0.0.0' }
+          }
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Build Windows installer
+        shell: pwsh
+        run: |
+          ./packaging/windows/build_installer.ps1 -Version "${{ steps.version.outputs.version }}"
+
+      - name: Upload Windows installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ShotlistCreator-Windows-${{ steps.version.outputs.version }}
+          path: dist/ShotlistCreator-${{ steps.version.outputs.version }}-Windows-Setup.exe
+
+      - name: Attach Windows installer to GitHub Release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/ShotlistCreator-${{ steps.version.outputs.version }}-Windows-Setup.exe

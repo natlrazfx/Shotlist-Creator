@@ -1,0 +1,7 @@
+PySide6
+pynput
+Pillow
+xlsxwriter
+psutil; platform_system == "Windows"
+pywin32; platform_system == "Windows"
+pyinstaller

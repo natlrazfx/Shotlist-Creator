@@ -60,12 +60,55 @@ You may need to set the these environment variables to allow for your Python ins
     PYTHONPATH="%PYTHONPATH%;%RESOLVE_SCRIPT_API%\Modules\"
 
 
-## Don@tes
-**If any of this turns out to be useful for you - I’m glad.  
-And if you feel like supporting it:  
-☕ 1–2 coffees are more than enough ☺️**  
+## Support
+If ShotlistCreator helps your workflow, you can support the project here:
 
-[Click to Buy me a Coffee](buymeacoffee.com/natlrazfx)
-[Subscribe me on Substack](https://substack.com/@natalia289425)
+[Support ShotlistCreator](https://aescripts.com/shotlist-creator-for-davinci-resolve/)
 
 *Footage is provided by Freepik.*
+
+## Installer Build (macOS + Windows)
+
+This repository now includes automated installer builds for both platforms:
+
+- macOS: `.pkg` installer
+- Windows: `.exe` setup installer
+
+### Build trigger
+
+Installers are built automatically by GitHub Actions when you push a tag like:
+
+```bash
+git tag -a v2.1.2 -m "Release v2.1.2"
+git push origin v2.1.2
+```
+
+You can also run the workflow manually from the Actions tab (`Build Installers`).
+
+### Output artifacts
+
+After workflow completion, download artifacts:
+
+- `ShotlistCreator-macOS-<version>.pkg`
+- `ShotlistCreator-<version>-Windows-Setup.exe`
+
+On tag builds, these files are also attached directly to the GitHub Release page.
+
+### Local build helpers
+
+- macOS: `./packaging/macos/build_pkg.sh 2.1.2`
+- Windows (PowerShell): `./packaging/windows/build_installer.ps1 -Version 2.1.2`
+
+## End-User Install Experience
+
+For non-technical users, distribution should be:
+
+1. User downloads installer from GitHub Release:
+`ShotlistCreator-<version>-Windows-Setup.exe` or `ShotlistCreator-<version>-macOS.pkg`.
+2. User installs normally (Next/Install flow).
+3. User opens DaVinci Resolve Studio and then launches ShotlistCreator.
+
+Important requirement:
+- DaVinci Resolve Studio must already be installed on the user's machine.
+
+If Resolve is missing/not running, the app now shows a clear startup message instead of a Python traceback.

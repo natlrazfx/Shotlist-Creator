@@ -1,5 +1,5 @@
 # Natalia Raz
-# ShotlistCreator v2.1.2 for DaVinci Resolve Studio
+# ShotlistCreator v2.1.14 for DaVinci Resolve Studio
 
 import os
 import json
@@ -7,6 +7,8 @@ import platform
 import subprocess
 import time
 import webbrowser
+import sys
+import urllib.request
 
 # Windows-only dependencies
 try:
@@ -18,7 +20,96 @@ except ImportError:
     # On macOS, these won't import, so we ignore them
     pass
 
-import DaVinciResolveScript as dvr_script
+def _bootstrap_resolve_scripting():
+    """Make DaVinci Resolve scripting module discoverable on macOS/Windows."""
+    resolve_script_api = os.environ.get("RESOLVE_SCRIPT_API")
+    if resolve_script_api:
+        modules_dir = os.path.join(resolve_script_api, "Modules")
+        if modules_dir not in sys.path:
+            sys.path.append(modules_dir)
+
+    system = platform.system()
+    if system == "Darwin":
+        default_api = "/Library/Application Support/Blackmagic Design/DaVinci Resolve/Developer/Scripting"
+        default_lib = "/Applications/DaVinci Resolve/DaVinci Resolve.app/Contents/Libraries/Fusion/fusionscript.so"
+        modules_dir = os.path.join(default_api, "Modules")
+        if os.path.isdir(modules_dir) and modules_dir not in sys.path:
+            sys.path.append(modules_dir)
+        os.environ.setdefault("RESOLVE_SCRIPT_API", default_api)
+        os.environ.setdefault("RESOLVE_SCRIPT_LIB", default_lib)
+    elif system == "Windows":
+        program_data = os.environ.get("PROGRAMDATA", r"C:\ProgramData")
+        default_api = os.path.join(program_data, "Blackmagic Design", "DaVinci Resolve", "Support", "Developer", "Scripting")
+        modules_dir = os.path.join(default_api, "Modules")
+        if os.path.isdir(modules_dir) and modules_dir not in sys.path:
+            sys.path.append(modules_dir)
+        default_lib = r"C:\Program Files\Blackmagic Design\DaVinci Resolve\fusionscript.dll"
+        os.environ.setdefault("RESOLVE_SCRIPT_API", default_api)
+        os.environ.setdefault("RESOLVE_SCRIPT_LIB", default_lib)
+
+
+_bootstrap_resolve_scripting()
+
+
+def _show_startup_error(message):
+    print(message)
+    system = platform.system()
+    if system == "Windows":
+        try:
+            import ctypes
+            ctypes.windll.user32.MessageBoxW(0, message, "ShotlistCreator startup error", 0x10)
+        except Exception:
+            pass
+    elif system == "Darwin":
+        try:
+            safe_message = message.replace('"', '\\"')
+            subprocess.run(
+                ["osascript", "-e", f'display dialog "{safe_message}" buttons {{"OK"}} default button "OK"'],
+                check=False,
+            )
+        except Exception:
+            pass
+
+
+def _is_macos_accessibility_trusted():
+    if platform.system() != "Darwin":
+        return True
+    trusted_values = []
+    try:
+        from ApplicationServices import AXIsProcessTrustedWithOptions, kAXTrustedCheckOptionPrompt
+        trusted_values.append(bool(AXIsProcessTrustedWithOptions({kAXTrustedCheckOptionPrompt: False})))
+    except Exception:
+        pass
+    try:
+        from Quartz import AXIsProcessTrusted
+        trusted_values.append(bool(AXIsProcessTrusted()))
+    except Exception:
+        pass
+    if not trusted_values:
+        return True
+    return any(trusted_values)
+
+
+def _request_macos_accessibility_permission(prompt=False):
+    if platform.system() != "Darwin":
+        return True
+    if prompt:
+        try:
+            from ApplicationServices import AXIsProcessTrustedWithOptions, kAXTrustedCheckOptionPrompt
+            AXIsProcessTrustedWithOptions({kAXTrustedCheckOptionPrompt: True})
+        except Exception:
+            pass
+    return _is_macos_accessibility_trusted()
+
+
+try:
+    import DaVinciResolveScript as dvr_script
+except Exception as exc:
+    _show_startup_error(
+        "Could not load DaVinci Resolve scripting API.\n\n"
+        "Please install DaVinci Resolve Studio and launch it once, then try again."
+    )
+    raise RuntimeError("DaVinciResolveScript import failed.") from exc
 import xlsxwriter
 from PySide6 import QtWidgets, QtCore, QtGui
 from PIL import Image
@@ -97,10 +188,254 @@ resolve = dvr_script.scriptapp("Resolve")
 keyboard = Controller()
 
 APP_NAME = "ShotlistCreator"
-APP_VERSION = "2.1.2"
+APP_VERSION = "2.1.14"
 __version__ = APP_VERSION
-RELEASE_FLAG = True
+RELEASE_FLAG = False
 APP_TITLE = f"{APP_NAME} v{APP_VERSION}" if RELEASE_FLAG else f"{APP_NAME} v{APP_VERSION} (dev)"
+README_URL = "https://github.com/natlrazfx/shotlist_creator2.1.2#how-it-works"
+SETUP_VIDEO_URL = "https://youtu.be/lGYmBYw0BuA"
+SETUP_THUMBNAIL_URL = "https://img.youtube.com/vi/lGYmBYw0BuA/maxresdefault.jpg"
+SETUP_LOCAL_IMAGE = os.path.join("assets", "next_marker_bind.png")
+SUPPORT_URL = "https://aescripts.com/shotlist-creator-for-davinci-resolve/"
+THUMBNAIL_FIELD = "Still/Thumbnail"
+TIMELINE_PREFIX = "Timeline:"
+
+
+def _get_config_path():
+    if platform.system() == "Windows":
+        base = os.environ.get("APPDATA", os.path.expanduser("~"))
+        cfg_dir = os.path.join(base, APP_NAME)
+    else:
+        cfg_dir = os.path.join(os.path.expanduser("~"), ".config", APP_NAME)
+    os.makedirs(cfg_dir, exist_ok=True)
+    return os.path.join(cfg_dir, "settings.json")
+
+
+def _load_settings():
+    cfg_path = _get_config_path()
+    if not os.path.exists(cfg_path):
+        return {}
+    try:
+        with open(cfg_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            return data
+    except Exception:
+        pass
+    return {}
+
+
+def _save_settings(data):
+    try:
+        with open(_get_config_path(), "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+    except Exception:
+        pass
+
+
+def _resource_path(relative_path):
+    base_path = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base_path, relative_path)
+
+
+def _current_app_path():
+    exe_path = os.path.abspath(sys.executable)
+    marker = ".app/"
+    if marker in exe_path:
+        return exe_path.split(marker, 1)[0] + ".app"
+    return exe_path
+
+
+def _load_setup_thumbnail():
+    local_image_path = _resource_path(SETUP_LOCAL_IMAGE)
+    if os.path.exists(local_image_path):
+        pixmap = QtGui.QPixmap(local_image_path)
+        if not pixmap.isNull():
+            return pixmap
+
+    try:
+        with urllib.request.urlopen(SETUP_THUMBNAIL_URL, timeout=3) as resp:
+            img_data = resp.read()
+        pixmap = QtGui.QPixmap()
+        if pixmap.loadFromData(img_data):
+            return pixmap
+    except Exception:
+        pass
+    return None
+
+
+def _open_macos_accessibility_settings():
+    if platform.system() != "Darwin":
+        return
+    subprocess.Popen(
+        ["open", "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"]
+    )
+    # Bring System Settings to front so macOS permission prompts are visible.
+    subprocess.run(
+        ["osascript", "-e", 'tell application "System Settings" to activate'],
+        check=False,
+    )
+
+
+def _open_macos_applications_folder():
+    if platform.system() != "Darwin":
+        return
+    subprocess.Popen(["open", "/Applications"])
+
+
+def _ensure_macos_accessibility_permission():
+    if platform.system() != "Darwin":
+        return True
+    if _is_macos_accessibility_trusted():
+        return True
+
+    while True:
+        app_path = _current_app_path()
+        app_hint = ""
+        if app_path.startswith("/Volumes/"):
+            app_hint = (
+                "\n\nCurrent app is running from a mounted DMG volume:\n"
+                f"{app_path}\n"
+                "Drag ShotlistCreator.app to /Applications and run it from there."
+            )
+
+        msg = QtWidgets.QMessageBox()
+        msg.setWindowTitle(APP_TITLE)
+        msg.setIcon(QtWidgets.QMessageBox.Warning)
+        msg.setText("Accessibility permission is required.")
+        msg.setInformativeText(
+            "ShotlistCreator uses keyboard control to jump between markers.\n\n"
+            "Open System Settings -> Privacy & Security -> Accessibility,\n"
+            "enable ShotlistCreator, then click Recheck.\n\n"
+            f"Current app path:\n{app_path}"
+            f"{app_hint}"
+        )
+        open_btn = msg.addButton("Open Settings", QtWidgets.QMessageBox.ActionRole)
+        open_apps_btn = msg.addButton("Open Applications Folder", QtWidgets.QMessageBox.ActionRole)
+        recheck_btn = msg.addButton("Recheck", QtWidgets.QMessageBox.AcceptRole)
+        exit_btn = msg.addButton("Exit", QtWidgets.QMessageBox.RejectRole)
+        msg.setDefaultButton(recheck_btn)
+        msg.exec()
+
+        if msg.clickedButton() == open_btn:
+            _request_macos_accessibility_permission(prompt=True)
+            _open_macos_accessibility_settings()
+        elif msg.clickedButton() == open_apps_btn:
+            _open_macos_applications_folder()
+        elif msg.clickedButton() == recheck_btn:
+            time.sleep(0.2)
+            if _is_macos_accessibility_trusted():
+                return True
+            QtWidgets.QMessageBox.information(
+                None,
+                APP_TITLE,
+                "Permission is still not active.\n\n"
+                f"Current app path:\n{app_path}\n\n"
+                "If you just enabled it, quit and relaunch ShotlistCreator, then click Recheck.",
+            )
+        else:
+            return False
+
+
+def _show_bind_setup_dialog(force=False):
+    settings = _load_settings()
+    if settings.get("hide_bind_setup_dialog") and not force:
+        return
+
+    dialog = QtWidgets.QDialog()
+    dialog.setWindowTitle(APP_TITLE)
+    dialog.setWindowFlag(QtCore.Qt.WindowStaysOnTopHint)
+    dialog.resize(980, 760)
+
+    layout = QtWidgets.QVBoxLayout(dialog)
+    title = QtWidgets.QLabel("One-time setup required: bind Next Marker to keyboard key 0.")
+    title.setWordWrap(True)
+    title.setStyleSheet("font-size: 30px; font-weight: 700;")
+    layout.addWidget(title)
+
+    thumbnail = _load_setup_thumbnail()
+    if thumbnail is not None:
+        image_label = QtWidgets.QLabel()
+        image_label.setPixmap(thumbnail.scaled(920, 420, QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation))
+        image_label.setAlignment(QtCore.Qt.AlignCenter)
+        layout.addWidget(image_label)
+
+    body = QtWidgets.QLabel(
+        "DaVinci Resolve -> Keyboard Customization -> Playback -> Next Marker -> set key 0.\n\n"
+        "ShotlistCreator uses this key to move through timeline markers."
+    )
+    body.setWordWrap(True)
+    body.setStyleSheet("font-size: 24px;")
+    layout.addWidget(body)
+
+    hide_checkbox = QtWidgets.QCheckBox("Don't show this again")
+    hide_checkbox.setChecked(bool(settings.get("hide_bind_setup_dialog")))
+    layout.addWidget(hide_checkbox)
+
+    buttons = QtWidgets.QHBoxLayout()
+    read_btn = QtWidgets.QPushButton("Read Instructions")
+    watch_btn = QtWidgets.QPushButton("Watch Tutorial")
+    continue_btn = QtWidgets.QPushButton("Continue")
+    continue_btn.setDefault(True)
+    read_btn.clicked.connect(lambda: webbrowser.open(README_URL))
+    watch_btn.clicked.connect(lambda: webbrowser.open(SETUP_VIDEO_URL))
+    continue_btn.clicked.connect(dialog.accept)
+    buttons.addWidget(read_btn)
+    buttons.addWidget(watch_btn)
+    buttons.addWidget(continue_btn)
+    layout.addLayout(buttons)
+
+    dialog.exec()
+
+    settings["hide_bind_setup_dialog"] = bool(hide_checkbox.isChecked())
+    _save_settings(settings)
+
+
+def _safe_timeline_item_call(timeline_item, method_name, *args):
+    method = getattr(timeline_item, method_name, None)
+    if not callable(method):
+        return ""
+    try:
+        return method(*args)
+    except TypeError:
+        try:
+            return method()
+        except Exception:
+            return ""
+    except Exception:
+        return ""
+
+
+def _collect_timeline_item_metadata(timeline_item):
+    if not timeline_item:
+        return {}
+
+    meta = {}
+
+    # Collect all generic timeline item properties exposed by Resolve.
+    try:
+        props = timeline_item.GetProperty()
+        if isinstance(props, dict):
+            for key, value in props.items():
+                meta[f"{TIMELINE_PREFIX} {key}"] = value
+    except Exception:
+        pass
+
+    # Add commonly requested timeline item values from dedicated API calls.
+    meta["Record In"] = _safe_timeline_item_call(timeline_item, "GetStart", False)
+    meta["Record Out"] = _safe_timeline_item_call(timeline_item, "GetEnd", False)
+    meta["Record Duration"] = _safe_timeline_item_call(timeline_item, "GetDuration", False)
+    meta["Source In"] = _safe_timeline_item_call(timeline_item, "GetSourceStartFrame")
+    meta["Source Out"] = _safe_timeline_item_call(timeline_item, "GetSourceEndFrame")
+    meta["Source Start Time"] = _safe_timeline_item_call(timeline_item, "GetSourceStartTime")
+    meta["Source End Time"] = _safe_timeline_item_call(timeline_item, "GetSourceEndTime")
+
+    track_info = _safe_timeline_item_call(timeline_item, "GetTrackTypeAndIndex")
+    if isinstance(track_info, (list, tuple)) and len(track_info) == 2:
+        meta["Track Type"] = track_info[0]
+        meta["Track Index"] = track_info[1]
+
+    return meta
 
 
 def get_save_file_name(project_name):
@@ -217,7 +552,24 @@ def gather_all_metadata_keys_from_timeline(timeline):
     gather the union of all clip properties from each MediaPoolItem,
     and return them as a list of keys (with standard fields at front).
     """
-    standard_fields = ["Frame", "Timecode", "Name", "Note", "Duration", "Color"]
+    standard_fields = [
+        THUMBNAIL_FIELD,
+        "Frame",
+        "Timecode",
+        "Name",
+        "Note",
+        "Duration",
+        "Color",
+        "Record In",
+        "Record Out",
+        "Source In",
+        "Source Out",
+        "Record Duration",
+        "Source Start Time",
+        "Source End Time",
+        "Track Type",
+        "Track Index",
+    ]
 
     # We'll store all discovered keys in a set
     discovered_keys = set()
@@ -227,6 +579,7 @@ def gather_all_metadata_keys_from_timeline(timeline):
     for track_idx in range(1, track_count + 1):
         timeline_items = timeline.GetItemListInTrack("video", track_idx)
         for ti in timeline_items:
+            discovered_keys.update(_collect_timeline_item_metadata(ti).keys())
             mp_item = ti.GetMediaPoolItem()
             if mp_item:
                 props = mp_item.GetClipProperty()
@@ -255,7 +608,7 @@ def export_markers(timeline, output_path, timecodes, excel_filename, metadata_li
     text_format = workbook.add_format({"valign": "vcenter", "align": "left"})
     max_size = image_size
 
-    headers = selected_fields + ["Still"]
+    headers = selected_fields
     for col_num, header in enumerate(headers):
         worksheet.write(0, col_num, header, text_format)
 
@@ -280,14 +633,16 @@ def export_markers(timeline, output_path, timecodes, excel_filename, metadata_li
         data_row.update(metadata_list[idx])
 
         for field in selected_fields:
-            if field == "Color":
+            if field == THUMBNAIL_FIELD:
+                worksheet.write(row, col, "", text_format)
+            elif field == "Color":
                 worksheet.write(row, col, "", get_color_format(workbook, data_row.get(field, "")))
             else:
                 worksheet.write(row, col, data_row.get(field, ""), text_format)
             col += 1
         row += 1
 
-    image_col_index = len(headers) - 1
+    image_col_index = headers.index(THUMBNAIL_FIELD) if THUMBNAIL_FIELD in headers else None
     row = 1
 
     # Export stills
@@ -332,9 +687,10 @@ def export_markers(timeline, output_path, timecodes, excel_filename, metadata_li
             resized_image = image.resize((new_width, new_height))
             resized_image.save(image_file_path)
 
-            worksheet.insert_image(row, image_col_index, image_file_path, {"x_scale": 1, "y_scale": 1, "object_position": 1})
-            worksheet.set_column(image_col_index, image_col_index, new_width / 6)
-            worksheet.set_row(row, new_height / 1.33)
+            if image_col_index is not None:
+                worksheet.insert_image(row, image_col_index, image_file_path, {"x_scale": 1, "y_scale": 1, "object_position": 1})
+                worksheet.set_column(image_col_index, image_col_index, new_width / 6)
+                worksheet.set_row(row, new_height / 1.33)
 
             row += 1
 
@@ -390,6 +746,7 @@ class UserInputDialog(QtWidgets.QDialog):
 
         self.search_results = []
         self.search_index = 0
+        self.field_role = QtCore.Qt.UserRole
 
         layout = QtWidgets.QVBoxLayout(self)
 
@@ -425,13 +782,15 @@ class UserInputDialog(QtWidgets.QDialog):
         preset_buttons_layout = QtWidgets.QHBoxLayout()
         load_preset_button = QtWidgets.QPushButton("Load Preset")
         save_preset_button = QtWidgets.QPushButton("Save Preset")
+        setup_guide_button = QtWidgets.QPushButton("Show Setup Guide")
 
 
         load_preset_button.clicked.connect(self.on_load_preset_clicked)
         save_preset_button.clicked.connect(self.on_save_preset_clicked)
+        setup_guide_button.clicked.connect(self.on_show_setup_guide_clicked)
 
-        # Donate button
-        donate_button = QtWidgets.QPushButton("Donate")
+        # Support button
+        donate_button = QtWidgets.QPushButton("Support")
         donate_button.setStyleSheet("""
                     QPushButton {
                         background-color: #8A2BE2; /* Purple */
@@ -442,10 +801,11 @@ class UserInputDialog(QtWidgets.QDialog):
                         background-color: #9E47FF; /* Slightly lighter on hover */
                     }
                 """)
-        donate_button.clicked.connect(lambda: webbrowser.open("https://www.airtm.me/natalia4xk3sygi"))
+        donate_button.clicked.connect(lambda: webbrowser.open(SUPPORT_URL))
 
         preset_buttons_layout.addWidget(load_preset_button)
         preset_buttons_layout.addWidget(save_preset_button)
+        preset_buttons_layout.addWidget(setup_guide_button)
         preset_buttons_layout.addWidget(donate_button)
         layout.addLayout(preset_buttons_layout)
 
@@ -480,21 +840,16 @@ class UserInputDialog(QtWidgets.QDialog):
         layout.addWidget(self.list_widget, stretch=1)
 
         # Default fields that are checked
-        default_selected_fields = [
-            "Frame", "Timecode", "Name", "Note", "Duration", "Color",
+        self.default_selected_fields = [
+            THUMBNAIL_FIELD, "Frame", "Timecode", "Name", "Note", "Duration", "Color",
+            "Record In", "Record Out",
+            "Source In", "Source Out", "Record Duration",
+            "Track Type", "Track Index",
             "Clip Name", "FPS", "File Path", "Video Codec",
             "Resolution", "Start TC", "End TC"
         ]
-
-        # Populate the list
-        for key in all_fields:
-            item = QtWidgets.QListWidgetItem(key)
-            item.setFlags(item.flags() | QtCore.Qt.ItemIsUserCheckable | QtCore.Qt.ItemIsEnabled)
-            if key in default_selected_fields:
-                item.setCheckState(QtCore.Qt.Checked)
-            else:
-                item.setCheckState(QtCore.Qt.Unchecked)
-            self.list_widget.addItem(item)
+        self.all_fields = list(all_fields)
+        self._rebuild_field_list(self.all_fields, set(self.default_selected_fields))
 
         # Select All / Deselect All
         button_layout = QtWidgets.QHBoxLayout()
@@ -538,6 +893,56 @@ class UserInputDialog(QtWidgets.QDialog):
         ok_cancel_layout.addWidget(cancel_button)
         layout.addLayout(ok_cancel_layout)
 
+    def _is_timeline_field(self, field_name):
+        return field_name.startswith(f"{TIMELINE_PREFIX} ") or field_name in {
+            "Record In",
+            "Record Out",
+            "Record Duration",
+            "Source In",
+            "Source Out",
+            "Source Start Time",
+            "Source End Time",
+            "Track Type",
+            "Track Index",
+        }
+
+    def _add_separator_item(self, label):
+        item = QtWidgets.QListWidgetItem(f"────────  {label}  ────────")
+        item.setFlags(QtCore.Qt.NoItemFlags)
+        item.setForeground(QtGui.QColor(140, 140, 140))
+        item.setData(self.field_role, "separator")
+        self.list_widget.addItem(item)
+
+    def _add_field_item(self, field_name, checked_fields):
+        item = QtWidgets.QListWidgetItem(field_name)
+        item.setFlags(item.flags() | QtCore.Qt.ItemIsUserCheckable | QtCore.Qt.ItemIsEnabled)
+        item.setData(self.field_role, "field")
+        if field_name in checked_fields:
+            item.setCheckState(QtCore.Qt.Checked)
+        else:
+            item.setCheckState(QtCore.Qt.Unchecked)
+        self.list_widget.addItem(item)
+
+    def _rebuild_field_list(self, field_order, checked_fields):
+        self.list_widget.clear()
+
+        standard_fields = [f for f in field_order if f in self.default_selected_fields and not self._is_timeline_field(f)]
+        timeline_fields = [f for f in field_order if self._is_timeline_field(f)]
+        clip_fields = [f for f in field_order if f not in standard_fields and f not in timeline_fields]
+
+        if standard_fields:
+            self._add_separator_item("Standard Fields")
+            for field in standard_fields:
+                self._add_field_item(field, checked_fields)
+        if timeline_fields:
+            self._add_separator_item("Timeline Fields")
+            for field in timeline_fields:
+                self._add_field_item(field, checked_fields)
+        if clip_fields:
+            self._add_separator_item("Clip Metadata")
+            for field in clip_fields:
+                self._add_field_item(field, checked_fields)
+
     # ----------------------------------------------------------------
     # Preset: one preset per JSON
     # ----------------------------------------------------------------
@@ -554,6 +959,8 @@ class UserInputDialog(QtWidgets.QDialog):
         checked_list = []
         for i in range(self.list_widget.count()):
             item = self.list_widget.item(i)
+            if item.data(self.field_role) != "field":
+                continue
             fields_in_order.append(item.text())
             if item.checkState() == QtCore.Qt.Checked:
                 checked_list.append(item.text())
@@ -581,18 +988,15 @@ class UserInputDialog(QtWidgets.QDialog):
             QtWidgets.QMessageBox.warning(self, "Error", f"Failed to read preset:\n{e}")
             return
 
-        fields_order = data.get("order", [])
-        checked_fields = set(data.get("checked", []))
+        fields_order = [f for f in data.get("order", []) if f in self.all_fields]
+        for f in self.all_fields:
+            if f not in fields_order:
+                fields_order.append(f)
+        checked_fields = {f for f in data.get("checked", []) if f in self.all_fields}
+        self._rebuild_field_list(fields_order, checked_fields)
 
-        self.list_widget.clear()
-        for field in fields_order:
-            item = QtWidgets.QListWidgetItem(field)
-            item.setFlags(item.flags() | QtCore.Qt.ItemIsUserCheckable | QtCore.Qt.ItemIsEnabled)
-            if field in checked_fields:
-                item.setCheckState(QtCore.Qt.Checked)
-            else:
-                item.setCheckState(QtCore.Qt.Unchecked)
-            self.list_widget.addItem(item)
+    def on_show_setup_guide_clicked(self):
+        _show_bind_setup_dialog(force=True)
 
     # ----------------------------------------------------------------
     # Searching
@@ -607,7 +1011,10 @@ class UserInputDialog(QtWidgets.QDialog):
             return
 
         for i in range(self.list_widget.count()):
-            txt = self.list_widget.item(i).text().lower()
+            item = self.list_widget.item(i)
+            if item.data(self.field_role) != "field":
+                continue
+            txt = item.text().lower()
             if query in txt:
                 self.search_results.append(i)
 
@@ -635,11 +1042,15 @@ class UserInputDialog(QtWidgets.QDialog):
     # ----------------------------------------------------------------
     def select_all_items(self):
         for i in range(self.list_widget.count()):
-            self.list_widget.item(i).setCheckState(QtCore.Qt.Checked)
+            item = self.list_widget.item(i)
+            if item.data(self.field_role) == "field":
+                item.setCheckState(QtCore.Qt.Checked)
 
     def deselect_all_items(self):
         for i in range(self.list_widget.count()):
-            self.list_widget.item(i).setCheckState(QtCore.Qt.Unchecked)
+            item = self.list_widget.item(i)
+            if item.data(self.field_role) == "field":
+                item.setCheckState(QtCore.Qt.Unchecked)
 
     # ----------------------------------------------------------------
     # Return final selections
@@ -648,6 +1059,8 @@ class UserInputDialog(QtWidgets.QDialog):
         selected_fields = []
         for i in range(self.list_widget.count()):
             item = self.list_widget.item(i)
+            if item.data(self.field_role) != "field":
+                continue
             if item.checkState() == QtCore.Qt.Checked:
                 selected_fields.append(item.text())
 
@@ -675,103 +1088,202 @@ if __name__ == "__main__":
     if not app:
         app = QtWidgets.QApplication([])
     set_dark_theme(app)
+    app_icon_path = _resource_path("icon.png")
+    if os.path.exists(app_icon_path):
+        app.setWindowIcon(QtGui.QIcon(app_icon_path))
+    if not _ensure_macos_accessibility_permission():
+        sys.exit(1)
+
+    if resolve is None:
+        QtWidgets.QMessageBox.critical(
+            None,
+            APP_TITLE,
+            "DaVinci Resolve Studio is not available.\n\nOpen Resolve Studio and run ShotlistCreator again.",
+        )
+        sys.exit(1)
 
     projectManager = resolve.GetProjectManager()
+    if projectManager is None:
+        QtWidgets.QMessageBox.critical(
+            None,
+            APP_TITLE,
+            "Could not access Resolve project manager.\n\nPlease restart DaVinci Resolve Studio and try again.",
+        )
+        sys.exit(1)
+
+    _show_bind_setup_dialog()
+
     currentProject = projectManager.GetCurrentProject()
+    if currentProject is None:
+        QtWidgets.QMessageBox.warning(
+            None,
+            APP_TITLE,
+            "No project is currently open.\n\nOpen a project in DaVinci Resolve Studio and run again.",
+        )
+        sys.exit(1)
+
     currentTimeline = currentProject.GetCurrentTimeline()
-    project_name = currentProject.GetName()
+    if currentTimeline is None:
+        QtWidgets.QMessageBox.warning(
+            None,
+            APP_TITLE,
+            "No timeline is currently active.\n\nOpen a timeline and run ShotlistCreator again.",
+        )
+        sys.exit(1)
 
-    # Gather all possible metadata keys from the entire timeline
-    all_fields = gather_all_metadata_keys_from_timeline(currentTimeline)
+    while True:
+        currentProject = projectManager.GetCurrentProject()
+        if currentProject is None:
+            QtWidgets.QMessageBox.warning(
+                None,
+                APP_TITLE,
+                "No project is currently open.\n\nOpen a project in DaVinci Resolve Studio and run again.",
+            )
+            sys.exit(1)
 
-    # Show the dialog
-    dialog = UserInputDialog(all_fields)
-    if dialog.exec() == QtWidgets.QDialog.Accepted:
+        currentTimeline = currentProject.GetCurrentTimeline()
+        if currentTimeline is None:
+            QtWidgets.QMessageBox.warning(
+                None,
+                APP_TITLE,
+                "No timeline is currently active.\n\nOpen a timeline and run ShotlistCreator again.",
+            )
+            sys.exit(1)
+
+        project_name = currentProject.GetName()
+        all_fields = gather_all_metadata_keys_from_timeline(currentTimeline)
+
+        dialog = UserInputDialog(all_fields)
+        if dialog.exec() != QtWidgets.QDialog.Accepted:
+            print("Operation cancelled.")
+            break
+
         selected_fields, image_size, timecode_to_set, delete_stills = dialog.get_values()
-
         if not selected_fields:
-            print("No metadata fields selected.")
-        else:
-            # Set timecode
-            currentTimeline.SetCurrentTimecode(timecode_to_set)
+            QtWidgets.QMessageBox.information(
+                None,
+                APP_TITLE,
+                "No metadata fields selected. Please choose at least one field.",
+            )
+            continue
 
-            # Delete stills if requested
-            if delete_stills:
-                resolve.OpenPage("color")
-                gallery = currentProject.GetGallery()
-                currentStillAlbum = gallery.GetCurrentStillAlbum()
-                stills = currentStillAlbum.GetStills()
-                if stills:
-                    success = currentStillAlbum.DeleteStills(stills)
-                    if success:
-                        print("All stills have been successfully deleted.")
-                    else:
-                        print("Failed to delete stills.")
+        # Re-read active project/timeline after dialog, so we always use user's current selection.
+        currentProject = projectManager.GetCurrentProject()
+        if currentProject is None:
+            QtWidgets.QMessageBox.warning(
+                None,
+                APP_TITLE,
+                "No project is currently open.\n\nOpen a project in DaVinci Resolve Studio and run again.",
+            )
+            continue
+        currentTimeline = currentProject.GetCurrentTimeline()
+        if currentTimeline is None:
+            QtWidgets.QMessageBox.warning(
+                None,
+                APP_TITLE,
+                "No timeline is currently active.\n\nOpen a timeline and run ShotlistCreator again.",
+            )
+            continue
+
+        markers = currentTimeline.GetMarkers()
+        if not markers:
+            QtWidgets.QMessageBox.information(
+                None,
+                APP_TITLE,
+                "No markers found on the current timeline.\n\n"
+                "Please add markers or switch to a timeline with markers,\n"
+                "then press OK to return to options.",
+            )
+            continue
+
+        # Set timecode
+        currentTimeline.SetCurrentTimecode(timecode_to_set)
+
+        # Delete stills if requested
+        if delete_stills:
+            resolve.OpenPage("color")
+            gallery = currentProject.GetGallery()
+            currentStillAlbum = gallery.GetCurrentStillAlbum()
+            stills = currentStillAlbum.GetStills()
+            if stills:
+                success = currentStillAlbum.DeleteStills(stills)
+                if success:
+                    print("All stills have been successfully deleted.")
                 else:
-                    print("No stills found in the album.")
-
-            # Prepare to collect marker-based data
-            timecodes = []
-            metadata_list = []
-
-            # Focus the timeline cross-platform
-            focus_on_timeline()
-
-            markers = currentTimeline.GetMarkers()
-            keyboard = Controller()
-
-            # For each marker
-            for i, (frame_id, marker) in enumerate(markers.items()):
-                numMarkersToEnd = len(markers) - (i + 1)
-                print("Number of markers until the end of the timeline:", numMarkersToEnd)
-
-                # Press "0" to jump to next marker
-                keyboard.press("0")
-                keyboard.release("0")
-                time.sleep(0.2)
-
-                # Get the new timecode
-                currentTimecode = currentTimeline.GetCurrentTimecode()
-                timecodes.append(currentTimecode)
-
-                # Grab still
-                currentTimeline.GrabStill()
-
-                # Also gather clip metadata at this marker
-                clip_metadata = {}
-                current_clip = currentTimeline.GetCurrentVideoItem()
-                if current_clip:
-                    clip_metadata["Clip Name"] = current_clip.GetName()
-                    mp_item = current_clip.GetMediaPoolItem()
-                    if mp_item:
-                        props = mp_item.GetClipProperty()
-                        for k, v in props.items():
-                            clip_metadata[k] = v
-                else:
-                    clip_metadata["Clip Name"] = "N/A"
-
-                metadata_list.append(clip_metadata)
-
-                if numMarkersToEnd == 0:
-                    break
-
-            # Ask user for output path
-            full_path = get_save_file_name(project_name)
-            if not full_path:
-                print("No output folder and filename selected.")
+                    print("Failed to delete stills.")
             else:
-                output_path, excel_filename = os.path.split(full_path)
-                if not excel_filename.endswith(".xlsx"):
-                    excel_filename += ".xlsx"
+                print("No stills found in the album.")
 
-                # Create subfolder if needed
-                output_path, excel_filename = ask_create_subfolder(output_path, excel_filename)
-                if output_path:
-                    export_markers(
-                        currentTimeline, output_path, timecodes, excel_filename,
-                        metadata_list, selected_fields, image_size
-                    )
-                    print("DONE")
-                    open_folder_in_explorer(output_path)
-    else:
-        print("Operation cancelled.")
+        # Prepare to collect marker-based data
+        timecodes = []
+        metadata_list = []
+
+        # Focus the timeline cross-platform
+        focus_on_timeline()
+        keyboard = Controller()
+
+        # For each marker
+        for i, (frame_id, marker) in enumerate(markers.items()):
+            numMarkersToEnd = len(markers) - (i + 1)
+            print("Number of markers until the end of the timeline:", numMarkersToEnd)
+
+            # Press "0" to jump to next marker
+            keyboard.press("0")
+            keyboard.release("0")
+            time.sleep(0.2)
+
+            # Get the new timecode
+            currentTimecode = currentTimeline.GetCurrentTimecode()
+            timecodes.append(currentTimecode)
+
+            # Grab still
+            currentTimeline.GrabStill()
+
+            # Also gather clip metadata at this marker
+            clip_metadata = {}
+            current_clip = currentTimeline.GetCurrentVideoItem()
+            if current_clip:
+                clip_metadata["Clip Name"] = current_clip.GetName()
+                clip_metadata.update(_collect_timeline_item_metadata(current_clip))
+                mp_item = current_clip.GetMediaPoolItem()
+                if mp_item:
+                    props = mp_item.GetClipProperty()
+                    for k, v in props.items():
+                        clip_metadata[k] = v
+            else:
+                clip_metadata["Clip Name"] = "N/A"
+                clip_metadata["Record In"] = ""
+                clip_metadata["Record Out"] = ""
+                clip_metadata["Source In"] = ""
+                clip_metadata["Source Out"] = ""
+                clip_metadata["Record Duration"] = ""
+                clip_metadata["Source Start Time"] = ""
+                clip_metadata["Source End Time"] = ""
+                clip_metadata["Track Type"] = ""
+                clip_metadata["Track Index"] = ""
+
+            metadata_list.append(clip_metadata)
+
+            if numMarkersToEnd == 0:
+                break
+
+        # Ask user for output path
+        full_path = get_save_file_name(project_name)
+        if not full_path:
+            print("No output folder and filename selected.")
+            continue
+
+        output_path, excel_filename = os.path.split(full_path)
+        if not excel_filename.endswith(".xlsx"):
+            excel_filename += ".xlsx"
+
+        # Create subfolder if needed
+        output_path, excel_filename = ask_create_subfolder(output_path, excel_filename)
+        if output_path:
+            export_markers(
+                currentTimeline, output_path, timecodes, excel_filename,
+                metadata_list, selected_fields, image_size
+            )
+            print("DONE")
+            open_folder_in_explorer(output_path)
+            break
